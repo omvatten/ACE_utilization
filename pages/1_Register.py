@@ -1,16 +1,11 @@
 import streamlit as st
-import streamlit_authenticator as stauth
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
-import random
-import pandas as pd
+from sqlalchemy import text
 
-if 'login_status' not in st.session_state or not st.session_state['login_status']:
-    st.session_state['login_status'] = False
+if st.session_state['username'] != 'ACE' or 'username' not in st.session_state:
     st.write('Please login on the main page.')
 
-if st.session_state['login_status']:
-
+else:
     st.title('Register a utilization activity')
     st.markdown('Fill out the fields below.')
     
@@ -28,8 +23,8 @@ if st.session_state['login_status']:
 
         thisy = datetime.now().year
         time = st.slider('Year(s) the activity was done', min_value=thisy-10, max_value=thisy+4, value=[thisy-1,thisy])
-        time_start = time[0]
-        time_end = time[1]
+        start_time = time[0]
+        end_time = time[1]
 
         comment = st.text_area('Brief description of the activity', help='Write what you did.')
     
@@ -37,9 +32,6 @@ if st.session_state['login_status']:
 
         submit = st.form_submit_button('Submit')
         if submit:
-            st.cache_data.clear()
-            conn = st.connection('gsheets', type=GSheetsConnection)
-            randnr = str(random.randint(10,99))
             now = datetime.now()
             mo = str(now.month)
             if len(mo) == 1:
@@ -48,21 +40,24 @@ if st.session_state['login_status']:
             if len(da) == 1:
                 da = '0'+da
             ts = str(now.year)+'-'+mo+'-'+da+'-'+str(now.hour)+'-'+str(now.minute)
-            key = cid + '__' + ts + '__' + randnr
+            inputlist = [cid, name, category, division, title, comment, links, str(start_time), str(end_time), ts]
 
+            inputs = {}
+            for field, value in zip(st.session_state['headings'], inputlist):
+                inputs[field] = value
+        
+            placeholders = ", ".join([f":{field}" for field in st.session_state['headings']])
+            columns = ", ".join(st.session_state['headings'])
+            values = {field: inputs[field] for field in st.session_state['headings']}
+        
             try:
-                df = conn.read(worksheet=cid, usecols=range(11))
-                df = df.set_index('key')
-                df.loc[key] = [cid, name, category, division, title, comment, links, time_start, time_end, ts]
-                df = df.reset_index()
-                conn.update(worksheet=cid, data=df)
-            except:
-                df = pd.DataFrame([[key, cid, name, category, division, title, comment, links, time_start, time_end, ts]], columns=st.session_state['headings'])
-                conn.create(worksheet=cid, data=df)
-                dfsum = conn.read(worksheet='summary', usecols=range(6))
-                for y in range(time_start, time_end+1):
-                    dfsum.loc[len(dfsum.index)] = [key, cid, name, category, division, y]
-                conn.update(worksheet='summary', data=dfsum)
+                conn = st.connection('neon', type='sql')
+                with conn.session as s:
+                    s.execute(text(f"INSERT INTO utildb ({columns}) VALUES ({placeholders})"), values)
+                    s.commit()
+                st.write('Added entry to database')
+            except Exception as e:
+                st.error(f"Database error: {e}")
 
     st.subheader('We categorize utilization activities as follows:')
     st.markdown("""
